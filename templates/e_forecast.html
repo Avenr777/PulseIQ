@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Electricity Forecast{% endblock %}
+
+{% block extra_head %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{% endblock %}
+
+{% block content %}
+
+<div style="padding: 32px;">
+
+<h2 style="margin-bottom: 24px;">Global Forecast Model</h2>
+
+<form method="GET" style="display:flex; gap:16px; margin-bottom:32px;">
+
+    <select name="asset" required>
+        <option value="">Select Asset</option>
+        {% for asset in assets %}
+            <option value="{{ asset.name }}"
+                {% if asset.name == selected_asset %}selected{% endif %}>
+                {{ asset.name }}
+            </option>
+        {% endfor %}
+    </select>
+
+    <select name="reading_type">
+        <option value="power_w">POWER_W</option>
+        <option value="voltage">VOLTAGE</option>
+        <option value="current_a">CURRENT_A</option>
+        <option value="energy_kwh">ENERGY_KWH</option>
+        <option value="power_factor">POWER_FACTOR</option>
+    </select>
+
+    <select name="steps">
+        <option value="6">6 Steps</option>
+        <option value="12">12 Steps</option>
+        <option value="24" selected>24 Steps</option>
+        <option value="48">48 Steps</option>
+    </select>
+
+    <button type="submit">Generate Forecast</button>
+
+</form>
+
+<div style="background:#111827; padding:24px; border-radius:12px;">
+    <canvas id="forecastChart"></canvas>
+</div>
+
+</div>
+
+{% endblock %}
+
+{% block extra_js %}
+
+<script>
+
+const history = JSON.parse('{{ history|escapejs }}');
+const historyLabels = JSON.parse('{{ history_labels|escapejs }}');
+const forecast = JSON.parse('{{ predictions|escapejs }}');
+const forecastLabels = JSON.parse('{{ labels|escapejs }}');
+const readingType = "{{ selected_reading_type }}";
+
+// Unit mapping
+function getUnit(type) {
+    switch(type) {
+        case "power_w": return "W";
+        case "voltage": return "V";
+        case "current_a": return "A";
+        case "energy_kwh": return "kWh";
+        case "power_factor": return "";
+        default: return "";
+    }
+}
+
+const unit = getUnit(readingType);
+
+// Merge labels
+const combinedLabels = [...historyLabels, ...forecastLabels];
+
+// Merge data
+const forecastData = [
+    ...Array(history.length).fill(null),
+    ...forecast
+];
+
+const ctx = document.getElementById("forecastChart").getContext("2d");
+
+new Chart(ctx, {
+    type: "line",
+    data: {
+        labels: combinedLabels,
+        datasets: [
+            {
+                label: "Historical",
+                data: history,
+                borderColor: "#6366F1",
+                backgroundColor: "rgba(99,102,241,0.08)",
+                tension: 0.35,
+                pointRadius: 2
+            },
+            {
+                label: "Forecast",
+                data: forecastData,
+                borderColor: "#EF4444",
+                borderDash: [6,6],
+                tension: 0.35,
+                pointRadius: 3
+            }
+        ]
+    },
+    options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+            legend: { labels: { color: "#ccc" } },
+            tooltip: {
+                callbacks: {
+                    label: function(ctx) {
+                        return `${ctx.dataset.label}: ${ctx.raw.toFixed(2)} ${unit}`;
+                    }
+                }
+            }
+        },
+        scales: {
+            x: {
+                title: {
+                    display: true,
+                    text: "Time",
+                    color: "#ccc"
+                },
+                ticks: { color: "#ccc" },
+                grid: { color: "#1A1A24" }
+            },
+            y: {
+                title: {
+                    display: true,
+                    text: `${readingType.toUpperCase()} (${unit})`,
+                    color: "#ccc"
+                },
+                ticks: { color: "#ccc" },
+                grid: { color: "#1A1A24" }
+            }
+        }
+    }
+});
+
+</script>
+
+{% endblock %}

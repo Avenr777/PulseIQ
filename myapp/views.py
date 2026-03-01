@@ -1,4 +1,4 @@
-from django.http import Http404
+from django.http import Http404, HttpResponse
 from django.shortcuts import render, redirect
 from django.contrib.auth.forms import UserCreationForm, AuthenticationForm
 from django.contrib.auth import login as auth_login, logout as auth_logout
@@ -12,6 +12,9 @@ from .models import Asset, PowerReading, AnomalyLog
 from myapp.utils.feature_engineering import build_feature_vector
 from .simulator import ASSET_CONFIG, READING_TYPES, cascade_state
 from .ml_models import asset_models
+from .ml_forecast import forecast_model, asset_encoder, reading_encoder, reading_type_scalers
+import pandas as pd
+from .utils.feature_forecast import build_forecast_features
 @login_required
 def home(request):
     return render(request, 'index.html')
@@ -177,6 +180,123 @@ def electricity(request):
     }
 
     return render(request, "electricity.html", context)
+
+def electricity_forecast(request):
+
+    selected_asset = request.GET.get("asset")
+    selected_reading_type = request.GET.get("reading_type", "power_w")
+    steps = int(request.GET.get("steps", 24))
+
+    assets = Asset.objects.all()
+
+    labels = []
+    predictions = []
+    history_real_values = []
+    history_labels = []
+
+    if selected_asset:
+
+        asset_obj = Asset.objects.get(name=selected_asset)
+
+        # Get last 24 readings
+        history_qs = PowerReading.objects.filter(
+            asset=asset_obj,
+            reading_type=selected_reading_type
+        ).order_by("-timestamp")[:24]
+
+        history_qs = list(history_qs)[::-1]
+
+        if len(history_qs) < 24:
+            return HttpResponse("Need at least 24 historical points.")
+
+        history_df = pd.DataFrame([{
+            "timestamp": r.timestamp,
+            "value": r.value
+        } for r in history_qs])
+
+        history_real_values = history_df["value"].tolist()
+        history_labels = [
+            r.timestamp.strftime("%H:%M") for r in history_qs
+        ]
+
+        # Scaling
+        scaler = reading_type_scalers[selected_reading_type]
+        history_df["value"] = scaler.transform(
+            history_df[["value"]]
+        )
+
+        history_scaled = history_df.copy()
+
+        asset_encoded = asset_encoder.transform([selected_asset])[0]
+        reading_encoded = reading_encoder.transform([selected_reading_type])[0]
+
+        expected_features = forecast_model.feature_name_
+
+        # Recursive forecast
+        for step in range(steps):
+
+            latest = history_scaled.tail(24)
+
+            features = {}
+
+            for i in range(1, 13):
+                features[f"lag_{i}"] = latest.iloc[-i]["value"]
+
+            features["rolling_mean_6"] = latest.tail(6)["value"].mean()
+            features["rolling_mean_12"] = latest.tail(12)["value"].mean()
+            features["rolling_mean_24"] = latest.tail(24)["value"].mean()
+            features["rolling_std_6"] = latest.tail(6)["value"].std()
+
+            future_time = history_qs[-1].timestamp + pd.Timedelta(minutes=step+1)
+
+            features["hour"] = future_time.hour
+            features["day_of_week"] = future_time.weekday()
+            features["asset_encoded"] = asset_encoded
+            features["reading_encoded"] = reading_encoded
+
+            X_input = pd.DataFrame([features])
+            X_input = X_input.reindex(columns=expected_features)
+
+            # -------- Model Prediction --------
+            model_pred = forecast_model.predict(X_input)[0]
+
+            # -------- Stabilization (Solution 2) --------
+            rolling_mean = latest.tail(6)["value"].mean()
+
+            # Blend 70% model + 30% rolling mean
+            next_scaled = 0.7 * model_pred + 0.3 * rolling_mean
+
+            # Optional safety clamp (recommended)
+            max_allowed = rolling_mean * 1.3
+            min_allowed = rolling_mean * 0.7
+            next_scaled = max(min(next_scaled, max_allowed), min_allowed) 
+
+            # Convert back to real scale
+            next_real = scaler.inverse_transform([[next_scaled]])[0][0]
+
+            predictions.append(float(next_real))
+            labels.append(future_time.strftime("%H:%M"))
+
+            history_scaled = pd.concat([
+                history_scaled,
+                pd.DataFrame([{
+                    "timestamp": future_time,
+                    "value": next_scaled
+                }])
+            ], ignore_index=True)
+
+    context = {
+        "assets": assets,
+        "history": json.dumps(history_real_values),
+        "history_labels": json.dumps(history_labels),
+        "predictions": json.dumps(predictions),
+        "labels": json.dumps(labels),
+        "selected_asset": selected_asset,
+        "selected_reading_type": selected_reading_type,
+        "steps": steps
+    }
+
+    return render(request, "e_forecast.html", context)
 def land(request):
     return render(request, 'land.html')
 def register(request):
