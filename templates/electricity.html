@@ -19,6 +19,7 @@
     <a href="{% url 'forecast' %}" class="sidebar-link">Forecast </a>
 
     <div class="divider" style="margin:16px 0;"></div>
+
     <a href="{% url 'home' %}" class="sidebar-link">Back to home</a>
   </aside>
 
@@ -107,14 +108,13 @@
                 style="padding:8px 12px; background:var(--surface);
                        border:1px solid var(--border);
                        border-radius:6px;">
-
           {% for rt in reading_types %}
             <option value="{{ rt }}"
-            {% if rt == selected_reading_type %}selected{% endif %}>
-            {{ rt|upper }}
-        </option>
-    {% endfor %}
-</select>
+              {% if rt == selected_reading_type %}selected{% endif %}>
+              {{ rt|upper }}
+            </option>
+          {% endfor %}
+        </select>
         <button type="submit"
                 style="padding:8px 14px;
                        border-radius:6px;

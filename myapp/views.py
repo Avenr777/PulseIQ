@@ -26,6 +26,7 @@ def electricity(request):
 
     assets_data = []
     cascade_risk = 0
+    assets_in_anomaly = 0
 
     selected_asset_name = request.GET.get("asset")
     selected_reading_type = request.GET.get("reading_type", "power_w")
@@ -99,6 +100,7 @@ def electricity(request):
 
                 if prediction == -1:
                     status = "Anomaly"
+                    assets_in_anomaly += 1
 
                     # Avoid duplicate logs
                     if not AnomalyLog.objects.filter(
@@ -174,6 +176,7 @@ def electricity(request):
         "anomaly_count": anomaly_count,
         "risk_score": risk_score,
         "cascade_risk": cascade_risk,
+        "assets_in_anomaly": assets_in_anomaly,
         "selected_asset": selected_asset_name,
         "selected_reading_type": selected_reading_type,
         "reading_types": READING_TYPES,
